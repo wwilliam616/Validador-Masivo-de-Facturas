@@ -2,6 +2,8 @@
 
 # 🧾 Validador de Facturas — Paraguay
 
+https://validador-masivo-de-facturas.vercel.app/
+
 ### Carga tu factura, deja que el OCR la lea, y obtén una validación automática en segundos.
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.2.6-black?logo=next.js)](https://nextjs.org/)
@@ -434,7 +436,7 @@ Estas limitaciones son intencionales: el objetivo del MVP es comprobar que el fl
 
 ---
 
-## 🗺️ Roadmap sugerido
+## 🗺️ Roadmap
 
 - [ ] Autenticación de usuarios con Supabase Auth + políticas RLS por organización.
 - [ ] Validación del dígito verificador del RUC paraguayo.
