@@ -6,7 +6,7 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 // Llama 3.2 11B Vision — Free model optimized for image understanding and OCR.
 // Override via OPENROUTER_MODEL env var if needed.
-const DEFAULT_MODEL = 'meta-llama/llama-3.2-11b-vision-instruct'
+const DEFAULT_MODEL = 'anthropic/claude-haiku-4.5'
 
 const SYSTEM_PROMPT = `Eres un sistema OCR especializado en facturas paraguayas.
 Tu única tarea es extraer TODO el texto visible de la imagen proporcionada,
