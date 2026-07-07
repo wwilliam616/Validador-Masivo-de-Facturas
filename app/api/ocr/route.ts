@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
             ],
           },
         ],
-        max_tokens: 3689,
+        max_tokens: 2000,
         temperature: 0, // Deterministic — we want exact transcription, not creativity
       }),
     })
