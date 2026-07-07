@@ -1,8 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { createWorker, PSM } from 'tesseract.js'
-import { pdfToCanvases } from '@/lib/pdf-to-images'
+import { pdfToBase64Pages, imageFileToBase64 } from '@/lib/pdf-to-images-base64'
 import { Progress } from '@/components/ui/progress'
 import type { Factura } from '@/lib/types'
 
@@ -31,6 +30,29 @@ export function UploadZone({ onSuccess }: UploadZoneProps) {
     [],
   )
 
+  /**
+   * Sends a single image (as base64) to the server-side /api/ocr endpoint,
+   * which forwards it to OpenRouter and returns the extracted text.
+   */
+  const ocrPage = useCallback(
+    async (base64: string, mediaType: string): Promise<string> => {
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_base64: base64, media_type: mediaType }),
+      })
+
+      const json = await res.json()
+
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error ?? 'Error al procesar OCR con IA.')
+      }
+
+      return json.texto as string
+    },
+    [],
+  )
+
   const processFile = useCallback(
     async (item: QueueItem) => {
       const { id, file } = item
@@ -41,47 +63,33 @@ export function UploadZone({ onSuccess }: UploadZoneProps) {
         const isPdf =
           file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
 
-        type TesseractSource = string | HTMLCanvasElement
-        let imageSources: TesseractSource[]
-        let objectUrls: string[] = []
+        const textParts: string[] = []
 
         if (isPdf) {
-          imageSources = await pdfToCanvases(file)
+          // Convert each PDF page to base64 PNG, then OCR each page individually
+          const pages = await pdfToBase64Pages(file)
+
+          for (let i = 0; i < pages.length; i++) {
+            updateItem(id, {
+              progress: 5 + Math.round(((i) / pages.length) * 70),
+            })
+            const pageText = await ocrPage(pages[i], 'image/png')
+            textParts.push(pageText)
+            updateItem(id, {
+              progress: 5 + Math.round(((i + 1) / pages.length) * 70),
+            })
+          }
         } else {
-          const url = URL.createObjectURL(file)
-          objectUrls = [url]
-          imageSources = [url]
-        }
-
-        // Tesseract worker — Spanish + English for numeric accuracy
-        const worker = await createWorker(['spa', 'eng'], 1, {
-          logger: (m) => {
-            if (m.status === 'recognizing text') {
-              updateItem(id, { progress: 5 + Math.round((m.progress ?? 0) * 70) })
-            }
-          },
-        })
-
-        // Improve numeric OCR: configure tessedit_char_whitelist is too restrictive,
-        // so we use page seg mode 6 (assume uniform text block) for cleaner extraction
-        await worker.setParameters({
-          tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
-        })
-
-        const textParts: string[] = []
-        for (let i = 0; i < imageSources.length; i++) {
-          const { data } = await worker.recognize(
-            imageSources[i] as Parameters<typeof worker.recognize>[0],
-          )
-          textParts.push(data.text ?? '')
-          updateItem(id, {
-            progress: 5 + Math.round(((i + 1) / imageSources.length) * 70),
-          })
+          // Single image file
+          updateItem(id, { progress: 20 })
+          const { base64, mediaType } = await imageFileToBase64(file)
+          updateItem(id, { progress: 40 })
+          const pageText = await ocrPage(base64, mediaType)
+          textParts.push(pageText)
+          updateItem(id, { progress: 75 })
         }
 
         const texto_crudo = textParts.join('\n')
-        await worker.terminate()
-        objectUrls.forEach((u) => URL.revokeObjectURL(u))
 
         updateItem(id, { status: 'saving', progress: 80 })
 
@@ -102,16 +110,19 @@ export function UploadZone({ onSuccess }: UploadZoneProps) {
         onSuccess(json.factura)
       } catch (err) {
         console.error('processFile error:', err)
-        updateItem(id, { status: 'error', error: 'Error al procesar el archivo.' })
+        updateItem(id, {
+          status: 'error',
+          error: err instanceof Error ? err.message : 'Error al procesar el archivo.',
+        })
       }
     },
-    [updateItem, onSuccess],
+    [updateItem, onSuccess, ocrPage],
   )
 
   const runQueue = useCallback(
     async (items: QueueItem[]) => {
       setIsRunning(true)
-      // Process sequentially to avoid spawning multiple heavy Tesseract workers
+      // Process sequentially to avoid rate-limiting on the OpenRouter API
       for (const item of items) {
         await processFile(item)
       }
@@ -131,12 +142,7 @@ export function UploadZone({ onSuccess }: UploadZoneProps) {
         progress: 0,
       }))
 
-      setQueue((prev) => {
-        const merged = [...prev, ...newItems]
-        return merged
-      })
-
-      // Kick off processing for just the new items
+      setQueue((prev) => [...prev, ...newItems])
       runQueue(newItems)
     },
     [runQueue],
@@ -238,7 +244,7 @@ export function UploadZone({ onSuccess }: UploadZoneProps) {
                   ].join(' ')}
                 >
                   {item.status === 'pending' && 'En cola...'}
-                  {item.status === 'ocr' && `OCR ${item.progress}%`}
+                  {item.status === 'ocr' && `Analizando con IA ${item.progress}%`}
                   {item.status === 'saving' && 'Guardando...'}
                   {item.status === 'done' && 'Completado'}
                   {item.status === 'error' && (item.error ?? 'Error')}
